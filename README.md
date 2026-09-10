@@ -23,10 +23,11 @@ http://localhost:3000/api/clientes
 
 | Archivo | Qué contiene |
 |---|---|
-| `src/server.js` | Configura Express, los middlewares y arranca el servidor |
-| `src/clientes.rutas.js` | Las 5 operaciones del CRUD de clientes |
-| `src/datos.js` | El array que hace de "base de datos" |
+| `src/server.js` | Todo el código: los datos, los middlewares y las 5 rutas del CRUD |
 | `peticiones.http` | Peticiones de ejemplo para probar la API |
+
+Todo está en un único archivo, y por dentro se lee de arriba abajo en 4 bloques:
+los datos, los middlewares, las rutas del CRUD y el arranque del servidor.
 
 ## Los 5 endpoints
 
@@ -90,7 +91,7 @@ Los dos primeros llegan **siempre como texto**, por eso el id se convierte con
 Cada operación del CRUD equivale a una sentencia SQL. Cuando cambiemos el array
 por una base de datos real, lo único que cambia es el interior de cada ruta:
 
-| En `clientes.rutas.js` | En SQL |
+| En `server.js` | En SQL |
 |---|---|
 | `clientes` | `SELECT * FROM clientes` |
 | `clientes.find(c => c.id === id)` | `SELECT * FROM clientes WHERE id = ?` |
@@ -109,4 +110,5 @@ El `id` es la **clave primaria** y la función `siguienteId()` imita al
 3. Impedir que se creen dos clientes con el mismo email (responder 409 Conflict).
 4. Crear el endpoint `GET /api/clientes/activos` filtrando por un campo `activo`.
 5. Repetir el CRUD completo para un recurso nuevo: `/api/productos`.
-6. Sustituir el array de `datos.js` por una base de datos real (SQLite o MongoDB).
+6. Separar el código en varios archivos (datos por un lado, rutas por otro).
+7. Sustituir el array de clientes por una base de datos real (SQLite o MongoDB).
