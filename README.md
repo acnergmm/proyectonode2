@@ -89,6 +89,30 @@ Es lo que más confunde al principio. Hay tres sitios distintos:
 Los dos primeros llegan **siempre como texto**, por eso el id se convierte con
 `Number()`. El body solo se puede leer gracias al middleware `express.json()`.
 
+## CORS: llamar a la API desde una página web
+
+Por seguridad, el navegador bloquea que una web haga peticiones a una dirección
+distinta de la suya (otro dominio, **otro puerto** o http/https). Es el caso
+típico de clase: un HTML abierto con Live Server en el puerto 5500 que hace
+`fetch()` a esta API del puerto 3000.
+
+La línea `app.use(cors())` de `server.js` añade las cabeceras que le dicen al
+navegador que esas llamadas están permitidas.
+
+```js
+// Desde un HTML abierto con Live Server (puerto 5500)
+fetch('http://localhost:3000/api/clientes')
+  .then((res) => res.json())
+  .then((clientes) => console.log(clientes));
+```
+
+Dos detalles que suelen confundir:
+
+- `cors()` sin opciones abre la API a **cualquier** web. Para aprender está
+  bien; en producción se limita: `app.use(cors({ origin: 'https://mitienda.com' }))`.
+- **curl, Postman y REST Client no aplican CORS**, porque no son navegadores.
+  Si las pruebas te funcionan ahí pero fallan desde el HTML, el problema es CORS.
+
 ## La base de datos
 
 ### La tabla
@@ -157,3 +181,5 @@ dato, nunca como una instrucción.
 6. Separar el código en varios archivos (la base de datos por un lado, las rutas por otro).
 7. Crear una segunda tabla `pedidos` con una columna `cliente_id` que apunte a
    `clientes.id` (una **clave foránea**) y montar su CRUD.
+8. Hacer un `index.html` que liste los clientes con `fetch()` y un formulario
+   para crear uno nuevo (aquí es donde se ve para qué sirve CORS).

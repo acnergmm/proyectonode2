@@ -7,6 +7,7 @@
 // ============================================================
 
 import express from 'express';
+import cors from 'cors';
 import { DatabaseSync } from 'node:sqlite';
 import { join } from 'node:path';
 
@@ -76,6 +77,23 @@ if (total === 0) {
 //
 // Un middleware es una funcion que se ejecuta ANTES de llegar a la ruta.
 // Cada peticion los va atravesando en orden, de arriba abajo.
+
+// CORS permite que una pagina web alojada en OTRA direccion pueda llamar
+// a esta API. Por seguridad, el navegador bloquea por defecto las peticiones
+// entre origenes distintos (otro dominio, otro puerto o http/https).
+//
+// Ejemplo tipico en clase: el HTML abierto en el puerto 5500 con Live Server
+// hace fetch() a esta API del puerto 3000. Son origenes distintos, asi que
+// sin esta linea el navegador rechaza la respuesta con un error de CORS.
+//
+// Ojo: cors() sin opciones abre la API a CUALQUIER web. Va bien para
+// aprender; en produccion se limita a los dominios de confianza:
+//   app.use(cors({ origin: 'https://mitienda.com' }));
+//
+// Curiosidad util: curl, Postman y el REST Client de VS Code NO aplican
+// CORS, porque no son navegadores. Por eso las pruebas funcionaban igual
+// antes de anadir esto.
+app.use(cors());
 
 // Lee el cuerpo JSON de las peticiones y lo deja listo en req.body.
 // Sin esta linea, req.body seria undefined en los POST y PUT.
