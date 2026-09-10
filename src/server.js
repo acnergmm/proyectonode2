@@ -1,43 +1,72 @@
 // ============================================================
 //  API REST DE CLIENTES  -  proyecto didactico
+//  Ahora con base de datos SQLite
 // ============================================================
 //  Arrancar con:  npm run dev
 //  Probar en:     http://localhost:3000/api/clientes
 // ============================================================
 
 import express from 'express';
+import { DatabaseSync } from 'node:sqlite';
+import { join } from 'node:path';
 
 const app = express();
 const PUERTO = 3000;
 
 
 // ============================================================
-//  1. NUESTRA "BASE DE DATOS": un simple array en memoria
+//  1. LA BASE DE DATOS
 // ============================================================
 //
-// Cada objeto del array es como una FILA de una tabla "clientes".
-// Las propiedades (id, nombre, email...) son las COLUMNAS.
+// SQLite viene incluido en Node, asi que no hay que instalar nada:
+// se importa con `node:sqlite`.
 //
-// El campo `id` es la CLAVE PRIMARIA: identifica a cada cliente
-// de forma unica y no se repite nunca.
+// Toda la base de datos es UN SOLO ARCHIVO (clientes.db) que se crea
+// solo la primera vez. Puedes abrirlo con la extension "SQLite Viewer"
+// de VS Code para ver la tabla por dentro.
 //
-// IMPORTANTE: al estar en memoria, los datos se pierden al parar
-// el servidor. Ese es justo el problema que resuelve una base de
-// datos de verdad (MySQL, PostgreSQL, MongoDB...): la PERSISTENCIA.
+// La gran diferencia con el array en memoria de antes: ahora los datos
+// SIGUEN AHI aunque pares el servidor. Eso es la PERSISTENCIA.
 
-const clientes = [
-  { id: 1, nombre: 'Ana Garcia', email: 'ana@ejemplo.com', telefono: '600111222' },
-  { id: 2, nombre: 'Luis Perez', email: 'luis@ejemplo.com', telefono: '600333444' },
-  { id: 3, nombre: 'Marta Ruiz', email: 'marta@ejemplo.com', telefono: '600555666' },
-];
+const db = new DatabaseSync(join(import.meta.dirname, '..', 'clientes.db'));
 
-// Contador para asignar el id al crear clientes nuevos.
-// Imita el AUTO_INCREMENT de una base de datos real.
-let ultimoId = 3;
 
-function siguienteId() {
-  ultimoId = ultimoId + 1;
-  return ultimoId;
+// --- Crear la tabla (el ESQUEMA) ---------------------------
+//
+// "IF NOT EXISTS" hace que solo se cree la primera vez.
+//
+// Cada columna declara su TIPO y sus RESTRICCIONES:
+//   INTEGER PRIMARY KEY  -> clave primaria; SQLite le asigna el numero solo
+//                           (es el AUTO_INCREMENT del que hablabamos)
+//   NOT NULL             -> ese campo es obligatorio
+//   UNIQUE               -> no puede repetirse en dos filas
+//
+// Fijate en que la propia base de datos ya protege los datos: aunque
+// nuestro codigo tuviera un fallo, no dejaria guardar dos clientes
+// con el mismo email.
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS clientes (
+    id       INTEGER PRIMARY KEY,
+    nombre   TEXT NOT NULL,
+    email    TEXT NOT NULL UNIQUE,
+    telefono TEXT
+  )
+`);
+
+
+// --- Datos de ejemplo (solo si la tabla esta vacia) ---------
+
+const { total } = db.prepare('SELECT COUNT(*) AS total FROM clientes').get();
+
+if (total === 0) {
+  const insertar = db.prepare(
+    'INSERT INTO clientes (nombre, email, telefono) VALUES (?, ?, ?)'
+  );
+  insertar.run('Ana Garcia', 'ana@ejemplo.com', '600111222');
+  insertar.run('Luis Perez', 'luis@ejemplo.com', '600333444');
+  insertar.run('Marta Ruiz', 'marta@ejemplo.com', '600555666');
+  console.log('Base de datos creada con 3 clientes de ejemplo');
 }
 
 
@@ -63,17 +92,36 @@ app.use((req, res, next) => {
 //  3. LAS 5 OPERACIONES DEL CRUD
 // ============================================================
 //
-//   CRUD          METODO HTTP   RUTA                 SQL equivalente
+//   CRUD          METODO HTTP   RUTA                 SQL
 //   ------------  ------------  -------------------  -----------------
-//   Read (todos)  GET           /api/clientes        SELECT *
-//   Read (uno)    GET           /api/clientes/:id    SELECT ... WHERE id
+//   Read (todos)  GET           /api/clientes        SELECT
+//   Read (uno)    GET           /api/clientes/:id    SELECT ... WHERE
 //   Create        POST          /api/clientes        INSERT
 //   Update        PUT           /api/clientes/:id    UPDATE
 //   Delete        DELETE        /api/clientes/:id    DELETE
 //
-// Fijate en una idea clave de REST: la URL nombra el RECURSO
-// (clientes) y el METODO HTTP dice que se hace con el.
-// Por eso NO hay rutas tipo /crearCliente o /borrarCliente.
+// Idea clave de REST: la URL nombra el RECURSO (clientes) y el METODO
+// HTTP dice que se hace con el. Por eso no hay rutas /crearCliente.
+//
+// ------------------------------------------------------------
+//  CONSULTAS PREPARADAS: los interrogantes (?)
+// ------------------------------------------------------------
+// Fijate en que los datos NUNCA se pegan dentro del texto del SQL.
+// Se escribe un ? y el valor se pasa aparte, en .get() o .run():
+//
+//   BIEN:  db.prepare('SELECT * FROM clientes WHERE id = ?').get(id)
+//   MAL:   db.prepare('SELECT * FROM clientes WHERE id = ' + id).get()
+//
+// Si se concatena el texto, alguien puede enviar un id como
+// "1; DROP TABLE clientes" y borrarte la tabla entera. Eso se llama
+// INYECCION SQL y es el fallo de seguridad mas clasico de una API.
+// Con ? la base de datos trata el valor siempre como dato, nunca
+// como instruccion.
+//
+// Los tres metodos que usaremos:
+//   .all()  -> devuelve TODAS las filas que coinciden (un array)
+//   .get()  -> devuelve UNA fila (o undefined si no hay ninguna)
+//   .run()  -> ejecuta sin devolver filas (INSERT, UPDATE, DELETE)
 
 
 // ------------------------------------------------------------
@@ -85,11 +133,16 @@ app.get('/api/clientes', (req, res) => {
   const { buscar } = req.query;
 
   if (buscar) {
-    const encontrados = clientes.filter((cliente) =>
-      cliente.nombre.toLowerCase().includes(buscar.toLowerCase())
-    );
+    // LIKE busca coincidencias parciales y % significa "cualquier cosa".
+    // Asi, %ana% encuentra tanto "Ana Garcia" como "Mariana".
+    const encontrados = db
+      .prepare('SELECT * FROM clientes WHERE nombre LIKE ? ORDER BY id')
+      .all(`%${buscar}%`);
+
     return res.json(encontrados);
   }
+
+  const clientes = db.prepare('SELECT * FROM clientes ORDER BY id').all();
 
   // res.json() convierte el array a JSON y responde con 200 OK.
   res.json(clientes);
@@ -104,7 +157,7 @@ app.get('/api/clientes/:id', (req, res) => {
   // Siempre llega como TEXTO, por eso lo pasamos a numero.
   const id = Number(req.params.id);
 
-  const cliente = clientes.find((c) => c.id === id);
+  const cliente = db.prepare('SELECT * FROM clientes WHERE id = ?').get(id);
 
   if (!cliente) {
     // 404 Not Found: el recurso pedido no existe.
@@ -129,18 +182,25 @@ app.post('/api/clientes', (req, res) => {
     return res.status(400).json({ error: 'El nombre y el email son obligatorios' });
   }
 
-  const nuevoCliente = {
-    id: siguienteId(),
-    nombre,
-    email,
-    telefono: telefono || null,
-  };
+  // El email es UNIQUE en la tabla, asi que si se repite la base de datos
+  // lanza un error. Lo capturamos con try/catch para responder con un
+  // mensaje claro en vez de que se caiga el servidor.
+  try {
+    const resultado = db
+      .prepare('INSERT INTO clientes (nombre, email, telefono) VALUES (?, ?, ?)')
+      .run(nombre, email, telefono || null);
 
-  clientes.push(nuevoCliente);
+    // Al insertar, SQLite nos dice que id le ha asignado a la fila nueva.
+    const nuevoCliente = db
+      .prepare('SELECT * FROM clientes WHERE id = ?')
+      .get(resultado.lastInsertRowid);
 
-  // 201 Created: se ha creado un recurso nuevo.
-  // Se devuelve el cliente creado para que se vea el id asignado.
-  res.status(201).json(nuevoCliente);
+    // 201 Created: se ha creado un recurso nuevo.
+    res.status(201).json(nuevoCliente);
+  } catch (error) {
+    // 409 Conflict: los datos son correctos, pero chocan con lo que ya existe.
+    res.status(409).json({ error: `Ya existe un cliente con el email ${email}` });
+  }
 });
 
 
@@ -151,26 +211,26 @@ app.put('/api/clientes/:id', (req, res) => {
   const id = Number(req.params.id);
   const { nombre, email, telefono } = req.body;
 
-  // findIndex nos da la POSICION en el array para poder modificarlo.
-  const posicion = clientes.findIndex((c) => c.id === id);
-
-  if (posicion === -1) {
-    return res.status(404).json({ error: `No existe el cliente con id ${id}` });
-  }
-
   if (!nombre || !email) {
     return res.status(400).json({ error: 'El nombre y el email son obligatorios' });
   }
 
-  // Sustituimos el cliente, pero conservando su id.
-  clientes[posicion] = {
-    id,
-    nombre,
-    email,
-    telefono: telefono || null,
-  };
+  try {
+    const resultado = db
+      .prepare('UPDATE clientes SET nombre = ?, email = ?, telefono = ? WHERE id = ?')
+      .run(nombre, email, telefono || null, id);
 
-  res.json(clientes[posicion]);
+    // .changes dice cuantas filas se han modificado.
+    // Si es 0, es que no habia ninguna fila con ese id.
+    if (resultado.changes === 0) {
+      return res.status(404).json({ error: `No existe el cliente con id ${id}` });
+    }
+
+    const actualizado = db.prepare('SELECT * FROM clientes WHERE id = ?').get(id);
+    res.json(actualizado);
+  } catch (error) {
+    res.status(409).json({ error: `Ya existe otro cliente con el email ${email}` });
+  }
 });
 
 
@@ -179,16 +239,17 @@ app.put('/api/clientes/:id', (req, res) => {
 // ------------------------------------------------------------
 app.delete('/api/clientes/:id', (req, res) => {
   const id = Number(req.params.id);
-  const posicion = clientes.findIndex((c) => c.id === id);
 
-  if (posicion === -1) {
+  // Leemos el cliente ANTES de borrarlo, para poder devolverlo en la respuesta.
+  const cliente = db.prepare('SELECT * FROM clientes WHERE id = ?').get(id);
+
+  if (!cliente) {
     return res.status(404).json({ error: `No existe el cliente con id ${id}` });
   }
 
-  // splice elimina 1 elemento a partir de esa posicion.
-  const [eliminado] = clientes.splice(posicion, 1);
+  db.prepare('DELETE FROM clientes WHERE id = ?').run(id);
 
-  res.json({ mensaje: 'Cliente eliminado', cliente: eliminado });
+  res.json({ mensaje: 'Cliente eliminado', cliente });
 });
 
 

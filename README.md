@@ -3,9 +3,9 @@
 API REST hecha con Node.js y Express para practicar los conceptos básicos de
 una API: rutas, métodos HTTP, códigos de estado, JSON y CRUD.
 
-Los datos se guardan **en memoria** (un array de JavaScript), sin base de datos.
-Al parar el servidor los cambios se pierden: eso es justamente lo que
-resolveremos más adelante con una base de datos real.
+Los datos se guardan en una base de datos **SQLite**, que viene incluida en Node
+(`node:sqlite`), así que no hay que instalar ni configurar ningún servidor de
+base de datos.
 
 ## Puesta en marcha
 
@@ -16,28 +16,30 @@ npm run dev     # arrancar el servidor y reiniciarlo al guardar cambios
 
 El servidor queda escuchando en http://localhost:3000
 
-Para comprobar que funciona, abre en el navegador:
+La primera vez se crea solo el archivo `clientes.db` con la tabla y 3 clientes
+de ejemplo. Para comprobar que funciona, abre en el navegador:
 http://localhost:3000/api/clientes
 
 ## Archivos del proyecto
 
 | Archivo | Qué contiene |
 |---|---|
-| `src/server.js` | Todo el código: los datos, los middlewares y las 5 rutas del CRUD |
+| `src/server.js` | Todo el código: la base de datos, los middlewares y las 5 rutas del CRUD |
+| `clientes.db` | La base de datos. Se crea sola al arrancar |
 | `peticiones.http` | Peticiones de ejemplo para probar la API |
 
-Todo está en un único archivo, y por dentro se lee de arriba abajo en 4 bloques:
-los datos, los middlewares, las rutas del CRUD y el arranque del servidor.
+Todo el código está en un único archivo, y por dentro se lee de arriba abajo en
+4 bloques: la base de datos, los middlewares, las rutas del CRUD y el arranque.
 
 ## Los 5 endpoints
 
-| Operación CRUD | Método | Ruta | Qué hace |
+| Operación CRUD | Método | Ruta | SQL que ejecuta |
 |---|---|---|---|
-| Read (todos) | GET | `/api/clientes` | Devuelve la lista de clientes |
-| Read (uno) | GET | `/api/clientes/:id` | Devuelve un cliente por su id |
-| Create | POST | `/api/clientes` | Crea un cliente nuevo |
-| Update | PUT | `/api/clientes/:id` | Modifica un cliente existente |
-| Delete | DELETE | `/api/clientes/:id` | Borra un cliente |
+| Read (todos) | GET | `/api/clientes` | `SELECT * FROM clientes` |
+| Read (uno) | GET | `/api/clientes/:id` | `SELECT * FROM clientes WHERE id = ?` |
+| Create | POST | `/api/clientes` | `INSERT INTO clientes ...` |
+| Update | PUT | `/api/clientes/:id` | `UPDATE clientes SET ... WHERE id = ?` |
+| Delete | DELETE | `/api/clientes/:id` | `DELETE FROM clientes WHERE id = ?` |
 
 La idea central de REST: **la URL nombra el recurso** (`clientes`) y **el método
 HTTP dice qué se hace con él**. Por eso no existen rutas como `/crearCliente`.
@@ -50,6 +52,7 @@ HTTP dice qué se hace con él**. Por eso no existen rutas como `/crearCliente`.
 | 201 Created | Recurso creado | POST que crea un cliente |
 | 400 Bad Request | La petición está mal | Falta el nombre o el email |
 | 404 Not Found | No existe | Un id o una ruta que no existen |
+| 409 Conflict | Choca con lo que ya hay | Un email que ya tiene otro cliente |
 
 ## Cómo probar la API
 
@@ -86,29 +89,71 @@ Es lo que más confunde al principio. Hay tres sitios distintos:
 Los dos primeros llegan **siempre como texto**, por eso el id se convierte con
 `Number()`. El body solo se puede leer gracias al middleware `express.json()`.
 
-## Puente hacia la base de datos
+## La base de datos
 
-Cada operación del CRUD equivale a una sentencia SQL. Cuando cambiemos el array
-por una base de datos real, lo único que cambia es el interior de cada ruta:
+### La tabla
 
-| En `server.js` | En SQL |
-|---|---|
-| `clientes` | `SELECT * FROM clientes` |
-| `clientes.find(c => c.id === id)` | `SELECT * FROM clientes WHERE id = ?` |
-| `clientes.push(nuevo)` | `INSERT INTO clientes (...) VALUES (...)` |
-| `clientes[posicion] = {...}` | `UPDATE clientes SET ... WHERE id = ?` |
-| `clientes.splice(posicion, 1)` | `DELETE FROM clientes WHERE id = ?` |
+```sql
+CREATE TABLE clientes (
+  id       INTEGER PRIMARY KEY,   -- clave primaria, se asigna sola
+  nombre   TEXT NOT NULL,         -- obligatorio
+  email    TEXT NOT NULL UNIQUE,  -- obligatorio y sin repetir
+  telefono TEXT                   -- opcional
+);
+```
 
-En el array, cada objeto es una **fila** y cada propiedad una **columna**.
-El `id` es la **clave primaria** y la función `siguienteId()` imita al
-`AUTO_INCREMENT`.
+Cada fila es un cliente y cada columna un dato suyo. Las **restricciones**
+(`NOT NULL`, `UNIQUE`) las vigila la propia base de datos: aunque el código
+tuviera un fallo, no dejaría guardar dos clientes con el mismo email.
+
+Toda la base de datos es un único archivo, `clientes.db`. Se puede abrir con la
+extensión *SQLite Viewer* de VS Code para ver la tabla por dentro.
+
+### Los tres métodos para consultar
+
+| Método | Qué devuelve | Para qué |
+|---|---|---|
+| `.all()` | Todas las filas (array) | `SELECT` de varios |
+| `.get()` | Una fila, o `undefined` | `SELECT` de uno |
+| `.run()` | Cuántas filas cambió | `INSERT`, `UPDATE`, `DELETE` |
+
+Tras un `INSERT`, `.run()` devuelve además `lastInsertRowid`: el id que la base
+de datos le ha asignado a la fila nueva.
+
+Tras un `UPDATE` o un `DELETE`, devuelve `changes`: cuántas filas se han tocado.
+Si vale 0, es que no existía ninguna fila con ese id, y por eso la API responde
+404.
+
+### Las consultas preparadas y la inyección SQL
+
+Los datos **nunca** se pegan dentro del texto del SQL. Se escribe un `?` y el
+valor se pasa aparte:
+
+```js
+// BIEN
+db.prepare('SELECT * FROM clientes WHERE id = ?').get(id)
+
+// MAL
+db.prepare('SELECT * FROM clientes WHERE id = ' + id).get()
+```
+
+Si se concatena el texto, alguien puede enviar como id algo así:
+
+```
+1; DROP TABLE clientes
+```
+
+...y borrar la tabla entera. Eso es una **inyección SQL**, el fallo de seguridad
+más clásico de una API. Con `?`, la base de datos trata el valor siempre como un
+dato, nunca como una instrucción.
 
 ## Ejercicios propuestos
 
-1. Añadir el campo `ciudad` a los clientes y devolverlo en todas las respuestas.
+1. Añadir la columna `ciudad` a la tabla y devolverla en todas las respuestas.
 2. Validar que el email contenga una `@`; si no, responder 400.
-3. Impedir que se creen dos clientes con el mismo email (responder 409 Conflict).
-4. Crear el endpoint `GET /api/clientes/activos` filtrando por un campo `activo`.
-5. Repetir el CRUD completo para un recurso nuevo: `/api/productos`.
-6. Separar el código en varios archivos (datos por un lado, rutas por otro).
-7. Sustituir el array de clientes por una base de datos real (SQLite o MongoDB).
+3. Ordenar el listado por nombre en vez de por id (`ORDER BY nombre`).
+4. Buscar también por email, no solo por nombre (`WHERE nombre LIKE ? OR email LIKE ?`).
+5. Añadir el método `PATCH` para modificar solo un campo, sin enviar el cliente entero.
+6. Separar el código en varios archivos (la base de datos por un lado, las rutas por otro).
+7. Crear una segunda tabla `pedidos` con una columna `cliente_id` que apunte a
+   `clientes.id` (una **clave foránea**) y montar su CRUD.
