@@ -1,0 +1,15 @@
+{
+  "name": "api-clientes",
+  "version": "1.0.0",
+  "description": "API REST didactica de clientes con Node y Express (datos en memoria, sin base de datos)",
+  "type": "module",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "express": "^5.2.1"
+  }
+}
