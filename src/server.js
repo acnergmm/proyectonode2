@@ -267,7 +267,7 @@ app.delete('/api/clientes/:id', (req, res) => {
 
   db.prepare('DELETE FROM clientes WHERE id = ?').run(id);
 
-  res.json({ mensaje: 'Cliente eliminado', cliente });
+  res.status(204).json({ mensaje: 'Cliente eliminado', cliente });
 });
 
 
